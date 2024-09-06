@@ -1,0 +1,116 @@
+const { LIQUIDITY_STATE_LAYOUT_V4, Market, MARKET_STATE_LAYOUT_V3, Liquidity } = require("@raydium-io/raydium-sdk");
+const { Connection, clusterApiUrl, PublicKey } = require("@solana/web3.js");
+
+const connection = new Connection("https://go.getblock.io/55a01ff9058d485da997ccb9c1d0bf6c");
+const RAYDIUM_V4_PROGRAM_ID = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8";
+async function fetchRaydiumPools() {
+  try {
+    async function getProgramAccounts(connection, baseMint, quoteMint) {
+      const layout = LIQUIDITY_STATE_LAYOUT_V4;
+
+      return connection.getProgramAccounts(new PublicKey(RAYDIUM_V4_PROGRAM_ID), {
+        filters: [
+          { dataSize: layout.span },
+          {
+            memcmp: {
+              offset: layout.offsetOf("baseMint"),
+              bytes: new PublicKey(baseMint).toBase58(),
+            },
+          },
+          {
+            memcmp: {
+              offset: layout.offsetOf("quoteMint"),
+              bytes: new PublicKey(quoteMint).toBase58(),
+            },
+          },
+        ],
+      });
+    }
+
+    // console.log(
+    //   "poolinfo : ",
+    //   await getProgramAccounts(connection, "So11111111111111111111111111111111111111112", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+    // );
+
+    async function findRaydiumPoolInfo(connection, baseMint, quoteMint) {
+      const layout = LIQUIDITY_STATE_LAYOUT_V4;
+      const programData = await getProgramAccounts(connection, baseMint, quoteMint);
+      const collectedPoolResults = programData
+        .map((info) => ({
+          id: new PublicKey(info.pubkey),
+          version: 4,
+          programId: new PublicKey(RAYDIUM_V4_PROGRAM_ID),
+          ...layout.decode(info.account.data),
+        }))
+        .flat();
+      // for (const key in collectedPoolResults) {
+      //   const element = collectedPoolResults[key];
+      //   console.log("pool : ", key, " : ", element.id.toBase58());
+      // }
+      const pool = collectedPoolResults[0];
+
+      if (!pool) return null;
+
+      const market = await connection.getAccountInfo(pool.marketId).then((item) => {
+        if (!item) {
+          throw new Error("Market account not found");
+        }
+        return {
+          programId: item.owner,
+          ...MARKET_STATE_LAYOUT_V3.decode(item.data),
+        };
+      });
+
+      const authority = Liquidity.getAssociatedAuthority({
+        programId: new PublicKey(RAYDIUM_V4_PROGRAM_ID),
+      }).publicKey;
+
+      const marketProgramId = market.programId;
+
+      return {
+        id: pool.id.toBase58(),
+        baseMint: pool.baseMint.toBase58(),
+        quoteMint: pool.quoteMint.toBase58(),
+        lpMint: pool.lpMint.toBase58(),
+        baseDecimals: Number.parseInt(pool.baseDecimal.toString()),
+        quoteDecimals: Number.parseInt(pool.quoteDecimal.toString()),
+        lpDecimals: Number.parseInt(pool.baseDecimal.toString()),
+        version: pool.version,
+        programId: pool.programId.toBase58(),
+        openOrders: pool.openOrders.toBase58(),
+        targetOrders: pool.targetOrders.toBase58(),
+        baseVault: pool.baseVault.toBase58(),
+        quoteVault: pool.quoteVault.toBase58(),
+        marketVersion: 3,
+        authority: authority.toBase58(),
+        marketProgramId: marketProgramId.toBase58(),
+        marketId: market.ownAddress.toBase58(),
+        marketAuthority: Market.getAssociatedAuthority({
+          programId: marketProgramId,
+          marketId: market.ownAddress,
+        }).publicKey.toBase58(),
+        marketBaseVault: market.baseVault.toBase58(),
+        marketQuoteVault: market.quoteVault.toBase58(),
+        marketBids: market.bids.toBase58(),
+        marketAsks: market.asks.toBase58(),
+        marketEventQueue: market.eventQueue.toBase58(),
+        withdrawQueue: pool.withdrawQueue.toString(),
+        lpVault: pool.lpVault.toString(),
+        lookupTableAccount: PublicKey.default.toBase58(),
+      };
+    }
+
+    let poolInfo = await findRaydiumPoolInfo(
+      connection,
+      "So11111111111111111111111111111111111111112",
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    );
+    console.log("poolInfo : ", poolInfo);
+    if (poolInfo) {
+    }
+  } catch (error) {
+    console.error("Error fetching Raydium pools:", error);
+  }
+}
+
+fetchRaydiumPools();
